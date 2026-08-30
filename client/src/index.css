@@ -1,0 +1,131 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens. Dark is the default (:root) — the app's original identity —
+ * and .light on <html> overrides to a warm cream/white "orange and black"
+ * counterpart. Values are RGB triplets (no `rgb()` wrapper) so Tailwind's
+ * `rgb(var(--x) / <alpha-value>)` pattern in tailwind.config.js can apply
+ * opacity modifiers like bg-amber-500/30.
+ *
+ * Colors used as TEXT (amber-400, the persona colors, slate) are deliberately
+ * more saturated/darker in light mode than a naive "same hue, same value"
+ * flip would give you — a pale amber or pastel mint that reads fine on near-
+ * black is close to invisible on white. Charcoal/slate numbers represent an
+ * emphasis ROLE (950 = page canvas, 50/100 = highest-contrast text), not a
+ * literal lightness value, which is what lets the same role invert correctly
+ * between themes.
+ */
+:root {
+  --c-950: 11 12 15;
+  --c-900: 18 19 23;
+  --c-800: 26 28 34;
+  --c-700: 36 38 46;
+  --c-600: 51 54 63;
+
+  --amber-400: 242 184 75;
+  --amber-500: 232 166 40;
+  --amber-600: 200 135 26;
+
+  --panel-hr: 110 231 183;
+  --panel-technical: 125 211 252;
+  --panel-skeptical: 252 165 165;
+
+  --s-50: 248 250 252;
+  --s-100: 241 245 249;
+  --s-200: 226 232 240;
+  --s-300: 203 213 225;
+  --s-400: 148 163 184;
+  --s-500: 100 116 139;
+}
+
+:root.light {
+  --c-950: 245 242 236;
+  --c-900: 255 255 255;
+  --c-800: 243 240 234;
+  --c-700: 226 221 209;
+  --c-600: 207 199 181;
+
+  --amber-400: 180 83 9;
+  --amber-500: 217 119 6;
+  --amber-600: 154 52 18;
+
+  --panel-hr: 5 150 105;
+  --panel-technical: 2 132 199;
+  --panel-skeptical: 220 38 38;
+
+  --s-50: 15 17 21;
+  --s-100: 23 25 31;
+  --s-200: 51 54 63;
+  --s-300: 69 75 87;
+  --s-400: 87 96 111;
+  --s-500: 115 123 138;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-charcoal-950 text-slate-100 font-sans antialiased transition-colors duration-300;
+}
+
+::selection {
+  @apply bg-amber-500/30 text-amber-100;
+}
+
+.btn-primary {
+  /* Text stays a fixed dark neutral (not the theme-inverting slate/charcoal
+     tokens) because amber is a light-toned fill in BOTH themes — dark text
+     on it is correct either way, unlike the page background it sits on. */
+  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 font-semibold text-neutral-900 transition hover:bg-amber-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-charcoal-600 bg-charcoal-800 px-5 py-2.5 font-semibold text-slate-100 transition hover:border-amber-500/50 hover:bg-charcoal-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
+}
+
+.card {
+  @apply rounded-2xl border border-charcoal-700 bg-charcoal-900/80 p-6 shadow-lg shadow-black/20 backdrop-blur transition-all duration-200;
+}
+
+.card-interactive {
+  @apply card hover:-translate-y-0.5 hover:border-amber-500/40 hover:shadow-xl;
+}
+
+.input-field {
+  @apply w-full rounded-lg border border-charcoal-600 bg-charcoal-800 px-4 py-2.5 text-slate-100 placeholder:text-slate-500 transition focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500;
+}
+
+.spinner {
+  @apply h-5 w-5 animate-spin rounded-full border-2 border-charcoal-600 border-t-amber-500;
+}
+
+@keyframes shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-3px);
+  }
+  40%,
+  60% {
+    transform: translateX(3px);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
