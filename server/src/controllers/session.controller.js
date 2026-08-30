@@ -3,7 +3,8 @@ import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { startSession, submitAnswer, resolveCrossExam, completeSession } from '../services/agent.service.js';
 
 export const submitAnswerSchema = z.object({
-  answerText: z.string().min(1).max(8000),
+  answerText: z.string().max(8000).optional(),
+  selectedOptionIndex: z.number().int().min(0).max(3).optional(),
   selfConfidence: z.number().int().min(1).max(5),
 });
 
@@ -41,12 +42,21 @@ export async function getSession(req, res, next) {
       .eq('session_id', session.id)
       .order('order_index', { ascending: true });
 
+    // A question the candidate hasn't answered yet must never carry the MCQ
+    // answer key to the client — RLS lets them see the row, but the answer
+    // key is an application-level secret until they've committed a guess.
+    const safeQuestions = (questions || []).map((q) => {
+      if (q.answers) return q;
+      const { correct_option_index, explanation, ...safe } = q;
+      return safe;
+    });
+
     const { data: resources } = await supabaseAdmin
       .from('learning_resources')
       .select('*')
       .eq('session_id', session.id);
 
-    res.json({ session, questions, resources: resources || [] });
+    res.json({ session, questions: safeQuestions, resources: resources || [] });
   } catch (err) {
     next(err);
   }
@@ -68,6 +78,7 @@ export async function postAnswer(req, res, next) {
       sessionId: req.params.sessionId,
       questionId: req.params.questionId,
       answerText: req.body.answerText,
+      selectedOptionIndex: req.body.selectedOptionIndex,
       selfConfidence: req.body.selfConfidence,
     });
     res.status(201).json(result);

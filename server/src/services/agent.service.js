@@ -1,25 +1,23 @@
 import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { decryptApiKey } from './crypto.service.js';
-import { generateQuestion, generatePanelFeedback, generateCrossExamChallenge } from './gemini.service.js';
+import {
+  generateMcqQuestion,
+  generateCodingQuestion,
+  generatePanelFeedback,
+  generateCrossExamChallenge,
+} from './gemini.service.js';
 import { findLearningResources } from './youtube.service.js';
 
-const QUESTIONS_PER_SESSION = 5;
+const QUESTIONS_PER_SESSION = 10;
 const ESCALATE_SCORE_THRESHOLD = 60;
 const ESCALATE_STDDEV_THRESHOLD = 20;
 const WEAK_SKILL_THRESHOLD = 65;
 const PERSONAS = ['hr', 'technical', 'skeptical'];
 const RECENT_QUESTIONS_LIMIT = 40;
 
-// A real interview has a shape: open on background, build through core skill
-// and an applied scenario, peak at the hardest question, close on
-// reflection. This maps 1-indexed order_index to that stage.
-const CATEGORY_BY_ORDER = {
-  1: 'background',
-  2: 'core-skill',
-  3: 'applied-scenario',
-  4: 'depth-challenge',
-  5: 'wrap-up',
-};
+// Fixed structure: 5 MCQ first, then 5 coding — not interleaved, so the
+// session reads as two clear sections rather than a shuffled mix.
+const TYPE_BY_ORDER = { 1: 'mcq', 2: 'mcq', 3: 'mcq', 4: 'mcq', 5: 'mcq', 6: 'coding', 7: 'coding', 8: 'coding', 9: 'coding', 10: 'coding' };
 
 function normalizeQuestionText(text) {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
@@ -44,6 +42,15 @@ function mean(nums) {
 function stddev(nums) {
   const m = mean(nums);
   return Math.sqrt(mean(nums.map((n) => (n - m) ** 2)));
+}
+
+// Never send correct_option_index/explanation for a question the candidate
+// hasn't answered yet — RLS controls which ROWS a user can see, not which
+// COLUMNS, so hiding the answer key is this app's job, not the database's.
+function sanitizeUnansweredQuestion(question) {
+  if (!question) return question;
+  const { correct_option_index, explanation, ...safe } = question;
+  return safe;
 }
 
 // Returns the caller's own Gemini key if they've added one via Settings (BYOK),
@@ -118,14 +125,48 @@ async function getRecentQuestionTexts(userId) {
 // The prompt instruction is the primary defense against repeats; this is a
 // cheap secondary check that retries once if Gemini echoes something too
 // close to a past question despite being told not to.
-async function generateUniqueQuestion(params) {
-  const first = await generateQuestion(params);
-  if (!isDuplicateQuestion(first.text, params.avoidQuestions)) return first;
+async function generateUniqueQuestionForOrder(orderIndex, baseParams) {
+  const type = TYPE_BY_ORDER[orderIndex] || 'coding';
+  const generator = type === 'mcq' ? generateMcqQuestion : generateCodingQuestion;
 
-  return generateQuestion({
-    ...params,
-    avoidQuestions: [first.text, ...params.avoidQuestions],
+  const first = await generator(baseParams);
+  const generated = isDuplicateQuestion(first.text, baseParams.avoidQuestions)
+    ? await generator({ ...baseParams, avoidQuestions: [first.text, ...baseParams.avoidQuestions] })
+    : first;
+
+  return { type, generated };
+}
+
+async function insertQuestion({ sessionId, orderIndex, type, generated }) {
+  const row = {
+    session_id: sessionId,
+    text: generated.text,
+    skill_tag: generated.skillTag,
+    difficulty: generated.difficulty,
+    order_index: orderIndex,
+    question_type: type,
+  };
+  if (type === 'mcq') {
+    row.options = generated.options;
+    row.correct_option_index = generated.correctOptionIndex;
+    row.explanation = generated.explanation;
+  }
+
+  const { data, error } = await supabaseAdmin.from('questions').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function generateAndInsertQuestion({ sessionId, orderIndex, apiKey, targetRole, resumeSummary, weakSkillTags, difficulty, avoidQuestions }) {
+  const { type, generated } = await generateUniqueQuestionForOrder(orderIndex, {
+    apiKey,
+    targetRole,
+    resumeSummary,
+    weakSkillTags,
+    difficulty,
+    avoidQuestions,
   });
+  return insertQuestion({ sessionId, orderIndex, type, generated });
 }
 
 export async function startSession(userId) {
@@ -135,8 +176,17 @@ export async function startSession(userId) {
     .eq('id', userId)
     .single();
 
+  // Both are mandatory: questions must be grounded in an actual resume and
+  // an actual target role, never a generic quiz — so there's nothing
+  // meaningful to start until both exist.
   if (!profile?.target_role) {
-    const err = new Error('Complete your profile (target role) before starting a session');
+    const err = new Error('Set your target role before starting a session');
+    err.status = 400;
+    err.publicMessage = err.message;
+    throw err;
+  }
+  if (!profile?.resume_summary) {
+    const err = new Error('Upload or paste your resume before starting a session');
     err.status = 400;
     err.publicMessage = err.message;
     throw err;
@@ -153,33 +203,23 @@ export async function startSession(userId) {
     .single();
   if (sessionErr) throw sessionErr;
 
-  const generated = await generateUniqueQuestion({
+  const question = await generateAndInsertQuestion({
+    sessionId: session.id,
+    orderIndex: 1,
     apiKey,
     targetRole: profile.target_role,
     resumeSummary: profile.resume_summary,
     weakSkillTags: weakestSkillTags(skillProfile.skill_mastery),
     difficulty: 'medium',
-    category: CATEGORY_BY_ORDER[1],
     avoidQuestions,
   });
 
-  const { data: question, error: questionErr } = await supabaseAdmin
-    .from('questions')
-    .insert({
-      session_id: session.id,
-      text: generated.text,
-      skill_tag: generated.skillTag,
-      difficulty: generated.difficulty,
-      order_index: 1,
-    })
-    .select('*')
-    .single();
-  if (questionErr) throw questionErr;
-
-  return { session, question };
+  return { session, question: sanitizeUnansweredQuestion(question) };
 }
 
-async function tagGapsAndAdvance({ userId, session, question, weakestFlaggedIssue, allFlaggedIssues, avgScore }) {
+// Shared by both MCQ (score is 100/0) and coding (score is the panel
+// average) — tags the skill profile and generates whatever comes next.
+async function recordScoreAndAdvance({ userId, session, question, allFlaggedIssues, avgScore }) {
   const skillProfile = await getOrCreateSkillProfile(userId);
 
   const nextTally = { ...skillProfile.weakness_tally };
@@ -211,54 +251,67 @@ async function tagGapsAndAdvance({ userId, session, question, weakestFlaggedIssu
   const nextOrderIndex = question.order_index + 1;
   const avoidQuestions = await getRecentQuestionTexts(userId);
 
-  const generated = await generateUniqueQuestion({
+  const nextQuestion = await generateAndInsertQuestion({
+    sessionId: session.id,
+    orderIndex: nextOrderIndex,
     apiKey,
     targetRole: profile.target_role,
     resumeSummary: profile.resume_summary,
     weakSkillTags: weakestSkillTags(nextMastery),
     difficulty,
-    category: CATEGORY_BY_ORDER[nextOrderIndex] || 'core-skill',
     avoidQuestions,
   });
 
-  const { data: nextQuestion, error } = await supabaseAdmin
-    .from('questions')
-    .insert({
-      session_id: session.id,
-      text: generated.text,
-      skill_tag: generated.skillTag,
-      difficulty: generated.difficulty,
-      order_index: nextOrderIndex,
-    })
-    .select('*')
-    .single();
-  if (error) throw error;
-
-  return { status: 'next_question', question: nextQuestion };
+  return { status: 'next_question', question: sanitizeUnansweredQuestion(nextQuestion) };
 }
 
-export async function submitAnswer({ userId, sessionId, questionId, answerText, selfConfidence }) {
-  const { data: question, error: qErr } = await supabaseAdmin
-    .from('questions')
-    .select('*, interview_sessions!inner(id, user_id)')
-    .eq('id', questionId)
-    .eq('interview_sessions.user_id', userId)
-    .single();
-  if (qErr || !question) {
-    const err = new Error('Question not found');
-    err.status = 404;
-    err.publicMessage = err.message;
-    throw err;
-  }
+async function submitMcqAnswer({ userId, question, selectedOptionIndex, selfConfidence }) {
+  const selectedText = question.options?.[selectedOptionIndex] ?? null;
 
   const { data: answer, error: aErr } = await supabaseAdmin
     .from('answers')
-    .insert({ question_id: questionId, answer_text: answerText, self_confidence: selfConfidence })
+    .insert({
+      question_id: question.id,
+      answer_text: selectedText,
+      selected_option_index: selectedOptionIndex,
+      self_confidence: selfConfidence,
+    })
     .select('*')
     .single();
   if (aErr) throw aErr;
 
-  const apiKey = await resolveApiKey(userId);
+  const correct = selectedOptionIndex === question.correct_option_index;
+  const score = correct ? 100 : 0;
+
+  const session = { id: question.interview_sessions.id };
+  const advance = await recordScoreAndAdvance({
+    userId,
+    session,
+    question,
+    allFlaggedIssues: [],
+    avgScore: score,
+  });
+
+  return {
+    status: advance.status,
+    answer,
+    mcqResult: {
+      correct,
+      correctOptionIndex: question.correct_option_index,
+      explanation: question.explanation,
+      selectedOptionIndex,
+    },
+    nextQuestion: advance.question,
+  };
+}
+
+async function submitCodingAnswer({ userId, question, answerText, selfConfidence, apiKey }) {
+  const { data: answer, error: aErr } = await supabaseAdmin
+    .from('answers')
+    .insert({ question_id: question.id, answer_text: answerText, self_confidence: selfConfidence })
+    .select('*')
+    .single();
+  if (aErr) throw aErr;
 
   const feedbackResults = await Promise.all(
     PERSONAS.map((persona) =>
@@ -311,15 +364,43 @@ export async function submitAnswer({ userId, sessionId, questionId, answerText, 
     return { status: 'cross_exam', answer, panelFeedback: panelRows, crossExam };
   }
 
-  const advance = await tagGapsAndAdvance({
-    userId,
-    session,
-    question,
-    allFlaggedIssues,
-    avgScore,
-  });
+  const advance = await recordScoreAndAdvance({ userId, session, question, allFlaggedIssues, avgScore });
 
   return { status: advance.status, answer, panelFeedback: panelRows, nextQuestion: advance.question };
+}
+
+export async function submitAnswer({ userId, sessionId, questionId, answerText, selectedOptionIndex, selfConfidence }) {
+  const { data: question, error: qErr } = await supabaseAdmin
+    .from('questions')
+    .select('*, interview_sessions!inner(id, user_id)')
+    .eq('id', questionId)
+    .eq('interview_sessions.user_id', userId)
+    .single();
+  if (qErr || !question) {
+    const err = new Error('Question not found');
+    err.status = 404;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  if (question.question_type === 'mcq') {
+    if (selectedOptionIndex === undefined || selectedOptionIndex === null) {
+      const err = new Error('Select an answer');
+      err.status = 400;
+      err.publicMessage = err.message;
+      throw err;
+    }
+    return submitMcqAnswer({ userId, question, selectedOptionIndex, selfConfidence });
+  }
+
+  if (!answerText || !answerText.trim()) {
+    const err = new Error('Write an answer');
+    err.status = 400;
+    err.publicMessage = err.message;
+    throw err;
+  }
+  const apiKey = await resolveApiKey(userId);
+  return submitCodingAnswer({ userId, question, answerText, selfConfidence, apiKey });
 }
 
 export async function resolveCrossExam({ userId, sessionId, crossExamId, userRebuttal }) {
@@ -361,7 +442,7 @@ export async function resolveCrossExam({ userId, sessionId, crossExamId, userReb
     .eq('id', crossExamId);
 
   const session = { id: question.interview_sessions.id };
-  const advance = await tagGapsAndAdvance({
+  const advance = await recordScoreAndAdvance({
     userId,
     session,
     question,
@@ -388,21 +469,41 @@ export async function completeSession({ userId, sessionId }) {
 
   const { data: questions } = await supabaseAdmin
     .from('questions')
-    .select('id, skill_tag, answers(id, self_confidence, panel_feedback(score, flagged_issues))')
+    .select(
+      'id, skill_tag, question_type, correct_option_index, answers(id, self_confidence, selected_option_index, panel_feedback(score, flagged_issues))'
+    )
     .eq('session_id', sessionId);
 
   // `answers.question_id` is a unique FK, so PostgREST embeds it as a single
   // object (not an array) — same for any other 1:1 embed in this codebase.
-  const answeredQuestions = (questions || []).filter((q) => q.answers?.panel_feedback?.length);
+  const answered = (questions || []).filter((q) => q.answers && (q.question_type === 'mcq' || q.answers.panel_feedback?.length));
 
-  const perQuestionAvg = answeredQuestions.map((q) => mean(q.answers.panel_feedback.map((f) => f.score)));
-  const overallScore = Math.round(mean(perQuestionAvg));
+  function scoreFor(q) {
+    if (q.question_type === 'mcq') return q.answers.selected_option_index === q.correct_option_index ? 100 : 0;
+    return mean(q.answers.panel_feedback.map((f) => f.score));
+  }
 
-  const selfConfidences = answeredQuestions.map((q) => q.answers.self_confidence * 20); // normalize 1-5 -> 0-100
+  const perQuestionScores = answered.map(scoreFor);
+  const overallScore = Math.round(mean(perQuestionScores));
+
+  const selfConfidences = answered.map((q) => q.answers.self_confidence * 20); // normalize 1-5 -> 0-100
   const calibrationGap = Math.round(mean(selfConfidences) - overallScore);
 
+  const mcqAnswered = answered.filter((q) => q.question_type === 'mcq');
+  const codingAnswered = answered.filter((q) => q.question_type === 'coding');
+  const typeBreakdown = {
+    mcq: {
+      correct: mcqAnswered.filter((q) => q.answers.selected_option_index === q.correct_option_index).length,
+      total: mcqAnswered.length,
+    },
+    coding: {
+      avgScore: codingAnswered.length ? Math.round(mean(codingAnswered.map(scoreFor))) : null,
+      total: codingAnswered.length,
+    },
+  };
+
   const issueTally = {};
-  for (const q of answeredQuestions) {
+  for (const q of codingAnswered) {
     for (const fb of q.answers.panel_feedback) {
       for (const issue of fb.flagged_issues || []) {
         issueTally[issue] = (issueTally[issue] || 0) + 1;
@@ -415,11 +516,7 @@ export async function completeSession({ userId, sessionId }) {
     .map(([issue, count]) => ({ issue, count }));
 
   const knowledgeGaps = [
-    ...new Set(
-      answeredQuestions
-        .filter((q) => mean(q.answers.panel_feedback.map((f) => f.score)) < WEAK_SKILL_THRESHOLD)
-        .map((q) => q.skill_tag)
-    ),
+    ...new Set(answered.filter((q) => scoreFor(q) < WEAK_SKILL_THRESHOLD).map((q) => q.skill_tag)),
   ];
 
   const { data: summary, error: sumErr } = await supabaseAdmin
@@ -430,6 +527,7 @@ export async function completeSession({ userId, sessionId }) {
       calibration_gap: calibrationGap,
       top_weaknesses: topWeaknesses,
       knowledge_gaps: knowledgeGaps,
+      type_breakdown: typeBreakdown,
     })
     .select('*')
     .single();

@@ -61,6 +61,30 @@ export default function SessionSummary() {
         </motion.div>
       </div>
 
+      {summary.type_breakdown && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="mt-4 grid grid-cols-2 gap-4"
+        >
+          <div className="card text-center">
+            <p className="text-sm text-slate-400">Multiple choice</p>
+            <p className="font-display text-2xl font-bold text-panel-technical">
+              {summary.type_breakdown.mcq?.correct ?? 0} / {summary.type_breakdown.mcq?.total ?? 0}
+            </p>
+            <p className="text-xs text-slate-500">correct</p>
+          </div>
+          <div className="card text-center">
+            <p className="text-sm text-slate-400">Coding</p>
+            <p className="font-display text-2xl font-bold text-amber-400">
+              {summary.type_breakdown.coding?.avgScore ?? '—'}
+            </p>
+            <p className="text-xs text-slate-500">avg score, {summary.type_breakdown.coding?.total ?? 0} questions</p>
+          </div>
+        </motion.div>
+      )}
+
       {summary.top_weaknesses?.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}

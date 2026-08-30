@@ -44,6 +44,8 @@ export default function ProfileSetup() {
 
   if (loading) return <Spinner />;
 
+  const canStart = Boolean(targetRole.trim() && resumeSummary.trim());
+
   return (
     <main className="mx-auto max-w-xl px-6 py-16">
       <motion.h1
@@ -87,9 +89,10 @@ export default function ProfileSetup() {
 
         <div>
           <label className="mb-1.5 block text-sm text-slate-300">
-            Resume summary <span className="text-slate-500">(auto-filled from upload, or edit/paste directly)</span>
+            Resume summary * <span className="text-slate-500">(auto-filled from upload, or edit/paste directly)</span>
           </label>
           <textarea
+            required
             rows={6}
             className="input-field resize-none"
             placeholder="Paste a short summary of your background, skills, and projects…"
@@ -102,7 +105,17 @@ export default function ProfileSetup() {
 
         {error && <p className="animate-shake text-sm font-medium text-red-600">{error}</p>}
 
-        <button type="submit" disabled={saving} className="btn-primary">
+        {!canStart && (
+          <p className="text-sm text-slate-500">
+            {!targetRole.trim() && !resumeSummary.trim()
+              ? 'Add your target role and resume to start — every question is generated from them.'
+              : !targetRole.trim()
+                ? 'Add your target role to start.'
+                : 'Add or upload your resume to start.'}
+          </p>
+        )}
+
+        <button type="submit" disabled={saving || !canStart} className="btn-primary">
           {saving ? (
             <span className="flex items-center gap-1.5">
               Starting session

@@ -8,9 +8,12 @@ import CrossExamPrompt from '../components/CrossExamPrompt.jsx';
 import VoiceCapture from '../components/VoiceCapture.jsx';
 import Spinner from '../components/Spinner.jsx';
 import TypingDots from '../components/TypingDots.jsx';
+import McqOptions from '../components/McqOptions.jsx';
+import McqResultCard from '../components/McqResultCard.jsx';
 import { Volume2 } from 'lucide-react';
 
 const PERSONA_LABELS = { hr: 'HR Panelist', technical: 'Technical Lead', skeptical: 'Skeptical Hiring Manager' };
+const TOTAL_QUESTIONS = 10;
 
 function PanelSkeleton() {
   return (
@@ -35,8 +38,6 @@ function PanelSkeleton() {
   );
 }
 
-const TOTAL_QUESTIONS = 5;
-
 export default function SessionLive() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
@@ -45,14 +46,18 @@ export default function SessionLive() {
   const [question, setQuestion] = useState(null);
   const [phase, setPhase] = useState('answering'); // answering | reviewing | cross_exam
   const [answerText, setAnswerText] = useState('');
+  const [selectedOptionIndex, setSelectedOptionIndex] = useState(null);
   const [selfConfidence, setSelfConfidence] = useState(3);
   const [panelFeedback, setPanelFeedback] = useState([]);
+  const [mcqResult, setMcqResult] = useState(null);
   const [crossExam, setCrossExam] = useState(null);
   const [pendingNextQuestion, setPendingNextQuestion] = useState(null);
   const [readyToComplete, setReadyToComplete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [error, setError] = useState('');
+
+  const isMcq = question?.question_type === 'mcq';
 
   const loadCurrentState = useCallback(async () => {
     const { data } = await apiClient.get(`/sessions/${sessionId}`);
@@ -75,15 +80,26 @@ export default function SessionLive() {
       setPhase('cross_exam');
       setCrossExam(openCrossExam);
       setPanelFeedback(answer.panel_feedback || []);
-    } else if (answer?.panel_feedback?.length) {
-      // Answer already scored and no open cross-exam — this question is done;
-      // wait for the next one (handles a mid-flow refresh gracefully).
+    } else if (answer) {
+      // Already answered (handles a mid-flow refresh gracefully) — show the
+      // result and wait for the candidate to continue.
       setPhase('reviewing');
-      setPanelFeedback(answer.panel_feedback);
+      if (current.question_type === 'mcq') {
+        setMcqResult({
+          correct: answer.selected_option_index === current.correct_option_index,
+          correctOptionIndex: current.correct_option_index,
+          explanation: current.explanation,
+          selectedOptionIndex: answer.selected_option_index,
+        });
+      } else {
+        setPanelFeedback(answer.panel_feedback || []);
+      }
     } else {
       setPhase('answering');
       setAnswerText('');
+      setSelectedOptionIndex(null);
       setPanelFeedback([]);
+      setMcqResult(null);
       setCrossExam(null);
     }
 
@@ -104,12 +120,14 @@ export default function SessionLive() {
     setSubmitting(true);
     setError('');
     try {
-      const { data } = await apiClient.post(`/sessions/${sessionId}/questions/${question.id}/answers`, {
-        answerText,
-        selfConfidence,
-      });
+      const body = isMcq ? { selectedOptionIndex, selfConfidence } : { answerText, selfConfidence };
+      const { data } = await apiClient.post(`/sessions/${sessionId}/questions/${question.id}/answers`, body);
 
-      setPanelFeedback(data.panelFeedback);
+      if (isMcq) {
+        setMcqResult(data.mcqResult);
+      } else {
+        setPanelFeedback(data.panelFeedback);
+      }
 
       if (data.status === 'cross_exam') {
         setPhase('cross_exam');
@@ -157,8 +175,10 @@ export default function SessionLive() {
         setPendingNextQuestion(null);
         setPhase('answering');
         setAnswerText('');
+        setSelectedOptionIndex(null);
         setSelfConfidence(3);
         setPanelFeedback([]);
+        setMcqResult(null);
       }
     } finally {
       setSubmitting(false);
@@ -167,6 +187,8 @@ export default function SessionLive() {
 
   if (loading) return <Spinner label="Loading session…" />;
 
+  const canSubmit = isMcq ? selectedOptionIndex !== null : answerText.trim().length > 0;
+
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
       <div className="mb-6">
@@ -174,10 +196,12 @@ export default function SessionLive() {
           <span>
             Question {question?.order_index} of {TOTAL_QUESTIONS}
           </span>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={voiceMode} onChange={(e) => setVoiceMode(e.target.checked)} />
-            Voice mode
-          </label>
+          {!isMcq && (
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={voiceMode} onChange={(e) => setVoiceMode(e.target.checked)} />
+              Voice mode
+            </label>
+          )}
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-charcoal-800">
           <div
@@ -189,7 +213,7 @@ export default function SessionLive() {
 
       <div className="card">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-lg text-slate-100">{question?.text}</p>
+          <p className="whitespace-pre-wrap text-lg text-slate-100">{question?.text}</p>
           {isSpeechSynthesisSupported() && (
             <button
               onClick={() => speak(question.text, 'narrator')}
@@ -199,9 +223,18 @@ export default function SessionLive() {
             </button>
           )}
         </div>
-        <span className="mt-2 inline-block rounded-full bg-charcoal-800 px-2.5 py-0.5 text-xs text-slate-500">
-          {question?.skill_tag}
-        </span>
+        <div className="mt-2 flex gap-1.5">
+          <span className="inline-block rounded-full bg-charcoal-800 px-2.5 py-0.5 text-xs text-slate-500">
+            {question?.skill_tag}
+          </span>
+          <span
+            className={`inline-block rounded-full px-2.5 py-0.5 text-xs ${
+              isMcq ? 'bg-panel-technical/10 text-panel-technical' : 'bg-amber-500/10 text-amber-400'
+            }`}
+          >
+            {isMcq ? 'Multiple choice' : 'Coding challenge'}
+          </span>
+        </div>
       </div>
 
       {phase === 'answering' && (
@@ -220,17 +253,28 @@ export default function SessionLive() {
             />
           </div>
 
-          <textarea
-            rows={6}
-            className="input-field resize-none"
-            placeholder="Type your answer, or use the mic…"
-            value={answerText}
-            onChange={(e) => setAnswerText(e.target.value)}
-          />
+          {isMcq ? (
+            <McqOptions
+              options={question.options}
+              selectedIndex={selectedOptionIndex}
+              onSelect={setSelectedOptionIndex}
+              disabled={submitting}
+            />
+          ) : (
+            <>
+              <textarea
+                rows={8}
+                className="input-field resize-none font-mono text-sm"
+                placeholder="Write your code (or your step-by-step approach) here, or use the mic…"
+                value={answerText}
+                onChange={(e) => setAnswerText(e.target.value)}
+              />
+              <VoiceCapture onTranscript={(text) => setAnswerText((prev) => `${prev} ${text}`.trim())} />
+            </>
+          )}
 
-          <div className="flex items-center justify-between">
-            <VoiceCapture onTranscript={(text) => setAnswerText((prev) => `${prev} ${text}`.trim())} />
-            <button disabled={!answerText.trim() || submitting} onClick={handleSubmitAnswer} className="btn-primary">
+          <div className="flex items-center justify-end">
+            <button disabled={!canSubmit || submitting} onClick={handleSubmitAnswer} className="btn-primary">
               {submitting ? (
                 <span className="flex items-center gap-1.5">
                   Submitting <TypingDots />
@@ -245,9 +289,14 @@ export default function SessionLive() {
 
       {error && <p className="mt-4 animate-shake text-sm font-medium text-red-600">{error}</p>}
 
-      {phase === 'answering' && submitting && <PanelSkeleton />}
+      {phase === 'answering' && submitting && !isMcq && <PanelSkeleton />}
 
       <AnimatePresence>
+        {mcqResult && (
+          <div className="mt-6">
+            <McqResultCard options={question.options} {...mcqResult} />
+          </div>
+        )}
         {panelFeedback.length > 0 && (
           <div className="mt-6 grid gap-4">
             {panelFeedback.map((f, i) => (
