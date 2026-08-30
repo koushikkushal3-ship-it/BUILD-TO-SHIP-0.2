@@ -104,8 +104,11 @@ export const atsScoreSchema = z.object({
 export async function getAtsScore(req, res, next) {
   try {
     const profile = await ensureProfile(req.user);
-    const resumeText = req.body.resumeSummary || profile.resume_summary;
-    const targetRole = req.body.targetRole || profile.target_role;
+    // Strict undefined checks, not `||` — an explicitly empty string (the
+    // textarea genuinely has nothing in it) must NOT silently fall back to
+    // stale saved data. Only a truly omitted field falls back.
+    const resumeText = req.body.resumeSummary !== undefined ? req.body.resumeSummary : profile.resume_summary;
+    const targetRole = req.body.targetRole !== undefined ? req.body.targetRole : profile.target_role;
 
     if (!resumeText) {
       const err = new Error('Add a resume before checking your ATS score');
