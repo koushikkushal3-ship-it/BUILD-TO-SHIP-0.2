@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { extractResumeText } from '../services/resume.service.js';
+import { classifyResumeText } from '../services/gemini.service.js';
+import { resolveApiKey } from '../services/agent.service.js';
 
 export const updateProfileSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -64,6 +66,18 @@ export async function uploadResumeFile(req, res, next) {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const resumeSummary = await extractResumeText(req.file.buffer, req.file.mimetype);
+
+    const apiKey = await resolveApiKey(req.user.id);
+    const classification = await classifyResumeText({ apiKey, text: resumeSummary });
+    if (!classification.isResume) {
+      const err = new Error(
+        `That looks like a ${classification.documentType}, not a resume — ${classification.reason}`
+      );
+      err.status = 400;
+      err.publicMessage = err.message;
+      throw err;
+    }
+
     await ensureProfile(req.user);
 
     const { data, error } = await supabaseAdmin

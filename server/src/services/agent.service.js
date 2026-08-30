@@ -49,7 +49,7 @@ function stddev(nums) {
 // Returns the caller's own Gemini key if they've added one via Settings (BYOK),
 // otherwise null so the platform default key is used. Logs the "used" event
 // either way is unnecessary for the platform key — only BYOK usage is audited.
-async function resolveApiKey(userId) {
+export async function resolveApiKey(userId) {
   const { data } = await supabaseAdmin
     .from('api_keys')
     .select('id, encrypted_key, iv, auth_tag')
