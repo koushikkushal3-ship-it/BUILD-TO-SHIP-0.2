@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { extractResumeText } from '../services/resume.service.js';
-import { classifyResumeText } from '../services/gemini.service.js';
+import { classifyResumeText, analyzeAtsScore } from '../services/gemini.service.js';
 import { resolveApiKey } from '../services/agent.service.js';
 
 export const updateProfileSchema = z.object({
@@ -89,6 +89,41 @@ export async function uploadResumeFile(req, res, next) {
     if (error) throw error;
 
     res.json({ profile: data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export const atsScoreSchema = z.object({
+  // Optional overrides so this works from Profile Setup too, before the form
+  // has been saved — falls back to the persisted profile when omitted.
+  resumeSummary: z.string().max(6000).optional(),
+  targetRole: z.string().max(160).optional(),
+});
+
+export async function getAtsScore(req, res, next) {
+  try {
+    const profile = await ensureProfile(req.user);
+    const resumeText = req.body.resumeSummary || profile.resume_summary;
+    const targetRole = req.body.targetRole || profile.target_role;
+
+    if (!resumeText) {
+      const err = new Error('Add a resume before checking your ATS score');
+      err.status = 400;
+      err.publicMessage = err.message;
+      throw err;
+    }
+    if (!targetRole) {
+      const err = new Error('Set a target role before checking your ATS score');
+      err.status = 400;
+      err.publicMessage = err.message;
+      throw err;
+    }
+
+    const apiKey = await resolveApiKey(req.user.id);
+    const analysis = await analyzeAtsScore({ apiKey, resumeText, targetRole });
+
+    res.json({ analysis });
   } catch (err) {
     next(err);
   }

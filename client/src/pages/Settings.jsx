@@ -4,6 +4,7 @@ import { apiClient } from '../lib/apiClient.js';
 import KeyVaultForm from '../components/KeyVaultForm.jsx';
 import Spinner from '../components/Spinner.jsx';
 import ResumeUpload from '../components/ResumeUpload.jsx';
+import AtsScoreCard from '../components/AtsScoreCard.jsx';
 
 export default function Settings() {
   const [name, setName] = useState('');
@@ -67,6 +68,10 @@ export default function Settings() {
           )}
         </AnimatePresence>
       </form>
+
+      <div className="mt-6">
+        <AtsScoreCard resumeSummary={resumeSummary} targetRole={targetRole} />
+      </div>
 
       <div className="mt-6">
         <KeyVaultForm />

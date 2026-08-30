@@ -5,6 +5,7 @@ import { apiClient } from '../lib/apiClient.js';
 import Spinner from '../components/Spinner.jsx';
 import ResumeUpload from '../components/ResumeUpload.jsx';
 import TypingDots from '../components/TypingDots.jsx';
+import AtsScoreCard from '../components/AtsScoreCard.jsx';
 
 export default function ProfileSetup() {
   const navigate = useNavigate();
@@ -96,6 +97,8 @@ export default function ProfileSetup() {
             onChange={(e) => setResumeSummary(e.target.value)}
           />
         </div>
+
+        <AtsScoreCard resumeSummary={resumeSummary} targetRole={targetRole} />
 
         {error && <p className="animate-shake text-sm font-medium text-red-600">{error}</p>}
 
