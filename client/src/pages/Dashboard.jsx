@@ -65,7 +65,7 @@ export default function Dashboard() {
           <h2 className="shrink-0 font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
             Skill scores
           </h2>
-          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="scrollbar-hidden flex-1 overflow-y-auto overflow-x-hidden">
             <SkillScoreList data={radarData} onSkillClick={setSelectedSkill} />
           </div>
         </div>
@@ -73,7 +73,7 @@ export default function Dashboard() {
           <h2 className="mb-3 shrink-0 font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
             Weakness explorer
           </h2>
-          <div className="flex-1 overflow-y-auto overflow-x-hidden pr-1">
+          <div className="scrollbar-hidden flex-1 overflow-y-auto overflow-x-hidden pr-1">
             <WeaknessExplorer weakSkills={weakSkills} onPractice={(skillTag, resources) => setDrill({ skillTag, resources })} />
           </div>
         </div>

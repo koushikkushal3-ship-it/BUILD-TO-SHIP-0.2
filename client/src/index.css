@@ -114,6 +114,16 @@ body {
   .spinner {
     @apply h-5 w-5 animate-spin rounded-full border-2 border-charcoal-600 border-t-amber-500;
   }
+
+  /* Still scrolls (wheel/touch/drag) — just doesn't show the track/thumb,
+     for fixed-height panels where the scrollbar reads as visual clutter. */
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @keyframes shake {
