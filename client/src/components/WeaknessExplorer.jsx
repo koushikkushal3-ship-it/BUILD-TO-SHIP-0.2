@@ -30,9 +30,9 @@ function WeaknessRow({ skill, onPractice }) {
         onClick={toggle}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
       >
-        <div className="flex items-center gap-2.5">
-          <span className="text-sm font-medium text-slate-100">{skill.skillTag}</span>
-          <span className="rounded-full bg-panel-skeptical/10 px-2 py-0.5 text-xs text-panel-skeptical">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="min-w-0 truncate text-sm font-medium text-slate-100">{skill.skillTag}</span>
+          <span className="shrink-0 rounded-full bg-panel-skeptical/10 px-2 py-0.5 text-xs text-panel-skeptical">
             {skill.masteryScore}/100
           </span>
         </div>

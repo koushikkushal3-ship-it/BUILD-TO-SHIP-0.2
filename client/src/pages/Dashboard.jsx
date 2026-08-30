@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Inbox } from 'lucide-react';
 import { apiClient } from '../lib/apiClient.js';
-import WeaknessRadarChart from '../components/WeaknessRadarChart.jsx';
+import SkillScoreList from '../components/SkillScoreList.jsx';
 import SkillHistoryPanel from '../components/SkillHistoryPanel.jsx';
 import WeaknessExplorer from '../components/WeaknessExplorer.jsx';
 import DailyChallengeCard from '../components/DailyChallengeCard.jsx';
@@ -63,17 +63,17 @@ export default function Dashboard() {
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div className="card-interactive flex h-[26rem] flex-col">
           <h2 className="shrink-0 font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
-            Skill radar
+            Skill scores
           </h2>
-          <div className="flex-1 overflow-y-auto">
-            <WeaknessRadarChart data={radarData} onSkillClick={setSelectedSkill} />
+          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+            <SkillScoreList data={radarData} onSkillClick={setSelectedSkill} />
           </div>
         </div>
         <div className="card-interactive flex h-[26rem] flex-col">
           <h2 className="mb-3 shrink-0 font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
             Weakness explorer
           </h2>
-          <div className="flex-1 overflow-y-auto pr-1">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden pr-1">
             <WeaknessExplorer weakSkills={weakSkills} onPractice={(skillTag, resources) => setDrill({ skillTag, resources })} />
           </div>
         </div>
