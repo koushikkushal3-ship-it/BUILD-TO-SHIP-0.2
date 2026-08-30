@@ -10,6 +10,7 @@ import SessionLive from './pages/SessionLive.jsx';
 import SessionSummary from './pages/SessionSummary.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Settings from './pages/Settings.jsx';
+import News from './pages/News.jsx';
 
 export default function App() {
   const location = useLocation();
@@ -50,6 +51,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/news"
+              element={
+                <ProtectedRoute>
+                  <News />
                 </ProtectedRoute>
               }
             />

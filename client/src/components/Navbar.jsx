@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Gavel, LayoutDashboard, Settings, LogOut, Sun, Moon } from 'lucide-react';
+import { Gavel, LayoutDashboard, Newspaper, Settings, LogOut, Sun, Moon } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useTheme } from '../context/ThemeContext.jsx';
@@ -46,6 +46,9 @@ export default function Navbar() {
             <nav className="flex items-center gap-4 text-sm text-slate-300">
               <Link to="/dashboard" className="flex items-center gap-1.5 transition hover:text-amber-400">
                 <LayoutDashboard size={16} /> Dashboard
+              </Link>
+              <Link to="/news" className="flex items-center gap-1.5 transition hover:text-amber-400">
+                <Newspaper size={16} /> News
               </Link>
               <Link to="/settings" className="flex items-center gap-1.5 transition hover:text-amber-400">
                 <Settings size={16} /> Settings
