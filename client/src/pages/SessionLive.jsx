@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { apiClient } from '../lib/apiClient.js';
-import { speak, isSpeechSynthesisSupported } from '../lib/speech.js';
+import { speak, isSpeechSynthesisSupported, stopSpeaking } from '../lib/speech.js';
 import PanelFeedbackCard from '../components/PanelFeedbackCard.jsx';
 import CrossExamPrompt from '../components/CrossExamPrompt.jsx';
 import VoiceCapture from '../components/VoiceCapture.jsx';
@@ -10,10 +10,20 @@ import Spinner from '../components/Spinner.jsx';
 import TypingDots from '../components/TypingDots.jsx';
 import McqOptions from '../components/McqOptions.jsx';
 import McqResultCard from '../components/McqResultCard.jsx';
-import { Volume2 } from 'lucide-react';
+import CodeEditor from '../components/CodeEditor.jsx';
+import ProctoringGate from '../components/ProctoringGate.jsx';
+import ViolationWarningModal from '../components/ViolationWarningModal.jsx';
+import SessionTerminated from '../components/SessionTerminated.jsx';
+import { Volume2, ShieldAlert, SkipForward } from 'lucide-react';
 
 const PERSONA_LABELS = { hr: 'HR Panelist', technical: 'Technical Lead', skeptical: 'Skeptical Hiring Manager' };
-const TOTAL_QUESTIONS = 10;
+const PERSONA_BADGE_CLASS = {
+  hr: 'bg-panel-hr/10 text-panel-hr',
+  technical: 'bg-panel-technical/10 text-panel-technical',
+  skeptical: 'bg-panel-skeptical/10 text-panel-skeptical',
+};
+const TOTAL_QUESTIONS = 14;
+const VIOLATION_DEBOUNCE_MS = 1500;
 
 function PanelSkeleton() {
   return (
@@ -50,12 +60,22 @@ export default function SessionLive() {
   const [selfConfidence, setSelfConfidence] = useState(3);
   const [panelFeedback, setPanelFeedback] = useState([]);
   const [mcqResult, setMcqResult] = useState(null);
+  const [skipped, setSkipped] = useState(false);
+  const [codeLanguage, setCodeLanguage] = useState('javascript');
   const [crossExam, setCrossExam] = useState(null);
   const [pendingNextQuestion, setPendingNextQuestion] = useState(null);
   const [readyToComplete, setReadyToComplete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [skipInFlight, setSkipInFlight] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [error, setError] = useState('');
+
+  // Proctoring
+  const [gatePassed, setGatePassed] = useState(false);
+  const [terminated, setTerminated] = useState(false);
+  const [violationCount, setViolationCount] = useState(0);
+  const [showWarning, setShowWarning] = useState(false);
+  const lastViolationAtRef = useRef(0);
 
   const isMcq = question?.question_type === 'mcq';
 
@@ -66,6 +86,15 @@ export default function SessionLive() {
       navigate(`/sessions/${sessionId}/summary`);
       return;
     }
+
+    if (data.session.status === 'terminated') {
+      setTerminated(true);
+      setViolationCount(data.session.violation_count);
+      setLoading(false);
+      return;
+    }
+
+    setViolationCount(data.session.violation_count || 0);
 
     const questions = data.questions || [];
     const current = questions[questions.length - 1];
@@ -84,7 +113,12 @@ export default function SessionLive() {
       // Already answered (handles a mid-flow refresh gracefully) — show the
       // result and wait for the candidate to continue.
       setPhase('reviewing');
-      if (current.question_type === 'mcq') {
+      if (answer.skipped) {
+        setSkipped(true);
+        setMcqResult(null);
+        setPanelFeedback([]);
+      } else if (current.question_type === 'mcq') {
+        setSkipped(false);
         setMcqResult({
           correct: answer.selected_option_index === current.correct_option_index,
           correctOptionIndex: current.correct_option_index,
@@ -92,6 +126,7 @@ export default function SessionLive() {
           selectedOptionIndex: answer.selected_option_index,
         });
       } else {
+        setSkipped(false);
         setPanelFeedback(answer.panel_feedback || []);
       }
     } else {
@@ -100,6 +135,7 @@ export default function SessionLive() {
       setSelectedOptionIndex(null);
       setPanelFeedback([]);
       setMcqResult(null);
+      setSkipped(false);
       setCrossExam(null);
     }
 
@@ -116,6 +152,80 @@ export default function SessionLive() {
     }
   }, [voiceMode, phase, question]);
 
+  // The narrator's speechSynthesis utterance is a global browser API, not
+  // tied to this component's lifecycle — without this, navigating away
+  // (finishing the session, going back to the dashboard) leaves it talking
+  // into an unmounted page.
+  useEffect(() => stopSpeaking, []);
+
+  // Tab-switch / fullscreen-exit detection — only armed once the candidate
+  // has passed the proctoring gate and the session isn't already over.
+  useEffect(() => {
+    if (!gatePassed || terminated) return;
+
+    async function triggerViolation() {
+      const now = Date.now();
+      // visibilitychange and fullscreenchange can both fire for the same
+      // real switch (e.g. alt-tabbing out of a fullscreen tab) — debounce
+      // so that counts as one violation, not two.
+      if (now - lastViolationAtRef.current < VIOLATION_DEBOUNCE_MS) return;
+      lastViolationAtRef.current = now;
+      stopSpeaking();
+
+      try {
+        const { data } = await apiClient.post(`/sessions/${sessionId}/violation`);
+        setViolationCount(data.violationCount);
+        if (data.terminated) {
+          setTerminated(true);
+          setShowWarning(false);
+        } else {
+          setShowWarning(true);
+        }
+      } catch {
+        // If the violation call itself fails (network blip), fail open —
+        // don't strand the candidate mid-session over a lost request.
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.hidden) triggerViolation();
+    }
+    function handleFullscreenChange() {
+      if (!document.fullscreenElement) triggerViolation();
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [gatePassed, terminated, sessionId]);
+
+  // Copy/paste/cut and the right-click menu are disabled for the whole
+  // session — same lifecycle as the violation listeners above. This can't
+  // stop a determined candidate with devtools open, but it closes off the
+  // casual "copy the question into ChatGPT" / "paste in a generated answer"
+  // path, same as most real proctored assessments.
+  useEffect(() => {
+    if (!gatePassed || terminated) return;
+
+    function blockClipboardEvent(e) {
+      e.preventDefault();
+    }
+
+    document.addEventListener('copy', blockClipboardEvent);
+    document.addEventListener('cut', blockClipboardEvent);
+    document.addEventListener('paste', blockClipboardEvent);
+    document.addEventListener('contextmenu', blockClipboardEvent);
+    return () => {
+      document.removeEventListener('copy', blockClipboardEvent);
+      document.removeEventListener('cut', blockClipboardEvent);
+      document.removeEventListener('paste', blockClipboardEvent);
+      document.removeEventListener('contextmenu', blockClipboardEvent);
+    };
+  }, [gatePassed, terminated]);
+
   async function handleSubmitAnswer() {
     setSubmitting(true);
     setError('');
@@ -123,6 +233,7 @@ export default function SessionLive() {
       const body = isMcq ? { selectedOptionIndex, selfConfidence } : { answerText, selfConfidence };
       const { data } = await apiClient.post(`/sessions/${sessionId}/questions/${question.id}/answers`, body);
 
+      setSkipped(false);
       if (isMcq) {
         setMcqResult(data.mcqResult);
       } else {
@@ -141,6 +252,26 @@ export default function SessionLive() {
       setError(err.response?.data?.error || 'Something went wrong');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleSkip() {
+    setSubmitting(true);
+    setSkipInFlight(true);
+    setError('');
+    try {
+      const { data } = await apiClient.post(`/sessions/${sessionId}/questions/${question.id}/skip`);
+      setSkipped(true);
+      setMcqResult(null);
+      setPanelFeedback([]);
+      setPhase('reviewing');
+      if (data.status === 'ready_to_complete') setReadyToComplete(true);
+      else setPendingNextQuestion(data.nextQuestion);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Something went wrong');
+    } finally {
+      setSubmitting(false);
+      setSkipInFlight(false);
     }
   }
 
@@ -166,6 +297,7 @@ export default function SessionLive() {
     setSubmitting(true);
     try {
       if (readyToComplete) {
+        stopSpeaking();
         await apiClient.post(`/sessions/${sessionId}/complete`);
         navigate(`/sessions/${sessionId}/summary`);
         return;
@@ -179,6 +311,7 @@ export default function SessionLive() {
         setSelfConfidence(3);
         setPanelFeedback([]);
         setMcqResult(null);
+        setSkipped(false);
       }
     } finally {
       setSubmitting(false);
@@ -186,22 +319,55 @@ export default function SessionLive() {
   }
 
   if (loading) return <Spinner label="Loading session…" />;
+  if (terminated) {
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-12">
+        <SessionTerminated />
+      </main>
+    );
+  }
+  if (!gatePassed) {
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-12">
+        <ProctoringGate onBegin={() => setGatePassed(true)} />
+      </main>
+    );
+  }
 
   const canSubmit = isMcq ? selectedOptionIndex !== null : answerText.trim().length > 0;
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
+      {showWarning && (
+        <ViolationWarningModal
+          violationCount={violationCount}
+          onAcknowledge={() => setShowWarning(false)}
+        />
+      )}
+
       <div className="mb-6">
-        <div className="mb-1 flex justify-between text-xs text-slate-500">
+        {question?.round_label && (
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
+            {question.round_label}
+          </p>
+        )}
+        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
           <span>
             Question {question?.order_index} of {TOTAL_QUESTIONS}
           </span>
-          {!isMcq && (
-            <label className="flex items-center gap-1.5">
-              <input type="checkbox" checked={voiceMode} onChange={(e) => setVoiceMode(e.target.checked)} />
-              Voice mode
-            </label>
-          )}
+          <div className="flex items-center gap-3">
+            {violationCount > 0 && (
+              <span className="flex items-center gap-1 text-panel-skeptical">
+                <ShieldAlert size={14} /> {violationCount}/2 violations
+              </span>
+            )}
+            {!isMcq && (
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={voiceMode} onChange={(e) => setVoiceMode(e.target.checked)} />
+                Voice mode
+              </label>
+            )}
+          </div>
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-charcoal-800">
           <div
@@ -234,6 +400,13 @@ export default function SessionLive() {
           >
             {isMcq ? 'Multiple choice' : 'Coding challenge'}
           </span>
+          {question?.authored_by_persona && (
+            <span
+              className={`inline-block rounded-full px-2.5 py-0.5 text-xs ${PERSONA_BADGE_CLASS[question.authored_by_persona]}`}
+            >
+              Asked by {PERSONA_LABELS[question.authored_by_persona]}
+            </span>
+          )}
         </div>
       </div>
 
@@ -262,18 +435,26 @@ export default function SessionLive() {
             />
           ) : (
             <>
-              <textarea
-                rows={8}
-                className="input-field resize-none font-mono text-sm"
-                placeholder="Write your code (or your step-by-step approach) here, or use the mic…"
+              <CodeEditor
                 value={answerText}
-                onChange={(e) => setAnswerText(e.target.value)}
+                onChange={setAnswerText}
+                language={codeLanguage}
+                onLanguageChange={setCodeLanguage}
+                disabled={submitting}
               />
               <VoiceCapture onTranscript={(text) => setAnswerText((prev) => `${prev} ${text}`.trim())} />
             </>
           )}
 
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={submitting}
+              className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-300 disabled:opacity-50"
+            >
+              <SkipForward size={14} /> Skip this question
+            </button>
             <button disabled={!canSubmit || submitting} onClick={handleSubmitAnswer} className="btn-primary">
               {submitting ? (
                 <span className="flex items-center gap-1.5">
@@ -289,12 +470,28 @@ export default function SessionLive() {
 
       {error && <p className="mt-4 animate-shake text-sm font-medium text-red-600">{error}</p>}
 
-      {phase === 'answering' && submitting && !isMcq && <PanelSkeleton />}
+      {phase === 'answering' && submitting && !isMcq && !skipInFlight && <PanelSkeleton />}
 
       <AnimatePresence>
+        {skipped && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="card mt-6 flex items-center gap-2 border-l-4 border-slate-600 text-slate-400"
+          >
+            <SkipForward size={18} className="shrink-0" />
+            <span className="text-sm">You skipped this question — it's scored as unanswered.</span>
+          </motion.div>
+        )}
         {mcqResult && (
           <div className="mt-6">
-            <McqResultCard options={question.options} {...mcqResult} />
+            <McqResultCard
+              options={question.options}
+              correct={mcqResult.correct}
+              correctOptionIndex={mcqResult.correctOptionIndex}
+              explanation={mcqResult.explanation}
+              selectedIndex={mcqResult.selectedOptionIndex}
+            />
           </div>
         )}
         {panelFeedback.length > 0 && (

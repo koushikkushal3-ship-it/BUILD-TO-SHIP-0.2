@@ -7,8 +7,10 @@ import {
   getSession,
   createSession,
   postAnswer,
+  postSkip,
   postRebuttal,
   postComplete,
+  postViolation,
   submitAnswerSchema,
   rebuttalSchema,
 } from '../controllers/session.controller.js';
@@ -22,7 +24,9 @@ router.get('/', listSessions);
 router.get('/:sessionId', getSession);
 router.post('/', createSession);
 router.post('/:sessionId/questions/:questionId/answers', validateBody(submitAnswerSchema), postAnswer);
+router.post('/:sessionId/questions/:questionId/skip', postSkip);
 router.post('/:sessionId/cross-exams/:crossExamId/rebuttal', validateBody(rebuttalSchema), postRebuttal);
 router.post('/:sessionId/complete', postComplete);
+router.post('/:sessionId/violation', postViolation);
 
 export default router;

@@ -8,16 +8,54 @@ import {
 } from './gemini.service.js';
 import { findLearningResources } from './youtube.service.js';
 
-const QUESTIONS_PER_SESSION = 10;
+// A real placement drive runs as distinct ROUNDS, not a flat quiz — an
+// aptitude round, a technical fundamentals round, an HR round, and a coding
+// round, each testing something different. This is deliberately not capped
+// at any fixed legacy count; it's sized to what each round actually needs to
+// cover, not squeezed to fit a number.
+const QUESTIONS_PER_SESSION = 14;
 const ESCALATE_SCORE_THRESHOLD = 60;
 const ESCALATE_STDDEV_THRESHOLD = 20;
-const WEAK_SKILL_THRESHOLD = 65;
+export const WEAK_SKILL_THRESHOLD = 65;
 const PERSONAS = ['hr', 'technical', 'skeptical'];
 const RECENT_QUESTIONS_LIMIT = 40;
 
-// Fixed structure: 5 MCQ first, then 5 coding — not interleaved, so the
-// session reads as two clear sections rather than a shuffled mix.
-const TYPE_BY_ORDER = { 1: 'mcq', 2: 'mcq', 3: 'mcq', 4: 'mcq', 5: 'mcq', 6: 'coding', 7: 'coding', 8: 'coding', 9: 'coding', 10: 'coding' };
+// Four rounds, back to back, mirroring how a real interview process is
+// actually run rather than one undifferentiated block of questions:
+//   Round 1 (slots 1-4):   Aptitude & Reasoning — generic, never grounded in
+//                          the candidate's resume/role, same as a real
+//                          placement-drive aptitude test.
+//   Round 2 (slots 5-8):   Technical Fundamentals — DSA, OOP, DBMS, OS/CN,
+//                          grounded in the resume/role where it fits.
+//   Round 3 (slot 9):      HR & Behavioral — one realistic workplace
+//                          judgment scenario, the way a real HR round is
+//                          usually just one or two conversational questions,
+//                          not dozens.
+//   Round 4 (slots 10-14): Coding Challenge — DSA implementation,
+//                          role-specific coding, a practical engineering
+//                          task, system design, and a low-level-design/
+//                          project trade-off question.
+// Each slot is owned by a specific interviewer persona, a subject lane, and
+// a `category` that decides which Gemini instruction voice applies (see
+// gemini.service.js's CATEGORY_INSTRUCTIONS) independent of which persona is
+// asking. `round` is persisted onto the question row so the frontend can
+// show which round the candidate is in without duplicating this map.
+const ORDER_CONFIG = {
+  1: { type: 'mcq', persona: 'hr', category: 'aptitude', round: 'Aptitude & Reasoning', subject: 'Quantitative Aptitude — percentages, ratios, time-speed-distance, profit & loss, permutations & combinations, data interpretation' },
+  2: { type: 'mcq', persona: 'hr', category: 'aptitude', round: 'Aptitude & Reasoning', subject: 'Quantitative Aptitude — number series, ages, mixtures & alligations, averages, simple/compound interest' },
+  3: { type: 'mcq', persona: 'hr', category: 'aptitude', round: 'Aptitude & Reasoning', subject: 'Logical Reasoning — blood relations, syllogisms, seating arrangements, coding-decoding, pattern/series completion, puzzles' },
+  4: { type: 'mcq', persona: 'hr', category: 'verbal', round: 'Aptitude & Reasoning', subject: 'Verbal Ability & Professional Communication — grammar/error-spotting, vocabulary (synonyms/antonyms), sentence correction, reading-comprehension-style inference, or the most professionally-worded version of a workplace message' },
+  5: { type: 'mcq', persona: 'technical', category: 'technical', round: 'Technical Fundamentals', subject: 'Programming & DSA fundamentals — core syntax, arrays/strings/recursion, complexity, classic interview problems (Two Sum, reverse linked list, etc.)' },
+  6: { type: 'mcq', persona: 'technical', category: 'technical', round: 'Technical Fundamentals', subject: 'Object-Oriented Programming — the four pillars, overloading vs overriding, abstract class vs interface, static members' },
+  7: { type: 'mcq', persona: 'technical', category: 'technical', round: 'Technical Fundamentals', subject: 'DBMS & SQL — normalization, keys/constraints, joins, ACID, indexing, common query patterns (Nth-highest salary, duplicates, group-by tasks)' },
+  8: { type: 'mcq', persona: 'technical', category: 'technical', round: 'Technical Fundamentals', subject: 'Operating Systems & Computer Networks — process/thread, CPU scheduling, memory & synchronization, OSI/TCP-IP layers, common protocols' },
+  9: { type: 'mcq', persona: 'hr', category: 'behavioral', round: 'HR & Behavioral', subject: 'Workplace judgment & behavior — teamwork, ownership, conflict resolution, prioritization, communication under a realistic work scenario' },
+  10: { type: 'coding', persona: 'technical', category: 'technical', round: 'Coding Challenge', subject: 'Core Data Structures & Algorithms — implement a data structure or algorithm (sorting, searching, recursion, a classic DSA problem)' },
+  11: { type: 'coding', persona: 'technical', category: 'technical', round: 'Coding Challenge', subject: "Role-specific coding — whatever the candidate's actual stack is (web backend/frontend, AI/ML, data engineering, mobile, etc.), grounded in their resume" },
+  12: { type: 'coding', persona: 'technical', category: 'technical', round: 'Coding Challenge', subject: 'Practical engineering task — a SQL query-writing problem, or a debugging/code-quality/testing task appropriate to the role' },
+  13: { type: 'coding', persona: 'skeptical', category: 'technical', round: 'Coding Challenge', subject: 'System design (fresher level) — client-server architecture, APIs, caching, load balancing, scalability, monolith vs microservices' },
+  14: { type: 'coding', persona: 'skeptical', category: 'technical', round: 'Coding Challenge', subject: 'Low-level design or project trade-off depth — SOLID principles/design patterns/object modeling, or a hard trade-off scenario from their own project' },
+};
 
 function normalizeQuestionText(text) {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
@@ -82,7 +120,7 @@ export async function resolveApiKey(userId) {
   return plaintext;
 }
 
-async function getOrCreateSkillProfile(userId) {
+export async function getOrCreateSkillProfile(userId) {
   const { data: existing } = await supabaseAdmin
     .from('skill_profiles')
     .select('*')
@@ -101,7 +139,7 @@ async function getOrCreateSkillProfile(userId) {
   return created;
 }
 
-function weakestSkillTags(skillMastery, limit = 3) {
+export function weakestSkillTags(skillMastery, limit = 3) {
   return Object.entries(skillMastery)
     .filter(([, score]) => score < WEAK_SKILL_THRESHOLD)
     .sort((a, b) => a[1] - b[1])
@@ -126,18 +164,19 @@ async function getRecentQuestionTexts(userId) {
 // cheap secondary check that retries once if Gemini echoes something too
 // close to a past question despite being told not to.
 async function generateUniqueQuestionForOrder(orderIndex, baseParams) {
-  const type = TYPE_BY_ORDER[orderIndex] || 'coding';
-  const generator = type === 'mcq' ? generateMcqQuestion : generateCodingQuestion;
+  const config = ORDER_CONFIG[orderIndex] || ORDER_CONFIG[QUESTIONS_PER_SESSION];
+  const generator = config.type === 'mcq' ? generateMcqQuestion : generateCodingQuestion;
+  const params = { ...baseParams, persona: config.persona, category: config.category, subjectFocus: config.subject };
 
-  const first = await generator(baseParams);
+  const first = await generator(params);
   const generated = isDuplicateQuestion(first.text, baseParams.avoidQuestions)
-    ? await generator({ ...baseParams, avoidQuestions: [first.text, ...baseParams.avoidQuestions] })
+    ? await generator({ ...params, avoidQuestions: [first.text, ...baseParams.avoidQuestions] })
     : first;
 
-  return { type, generated };
+  return { type: config.type, persona: config.persona, round: config.round, generated };
 }
 
-async function insertQuestion({ sessionId, orderIndex, type, generated }) {
+async function insertQuestion({ sessionId, orderIndex, type, persona, round, generated }) {
   const row = {
     session_id: sessionId,
     text: generated.text,
@@ -145,6 +184,8 @@ async function insertQuestion({ sessionId, orderIndex, type, generated }) {
     difficulty: generated.difficulty,
     order_index: orderIndex,
     question_type: type,
+    authored_by_persona: persona,
+    round_label: round,
   };
   if (type === 'mcq') {
     row.options = generated.options;
@@ -158,7 +199,7 @@ async function insertQuestion({ sessionId, orderIndex, type, generated }) {
 }
 
 async function generateAndInsertQuestion({ sessionId, orderIndex, apiKey, targetRole, resumeSummary, weakSkillTags, difficulty, avoidQuestions }) {
-  const { type, generated } = await generateUniqueQuestionForOrder(orderIndex, {
+  const { type, persona, round, generated } = await generateUniqueQuestionForOrder(orderIndex, {
     apiKey,
     targetRole,
     resumeSummary,
@@ -166,7 +207,7 @@ async function generateAndInsertQuestion({ sessionId, orderIndex, apiKey, target
     difficulty,
     avoidQuestions,
   });
-  return insertQuestion({ sessionId, orderIndex, type, generated });
+  return insertQuestion({ sessionId, orderIndex, type, persona, round, generated });
 }
 
 export async function startSession(userId) {
@@ -372,13 +413,24 @@ async function submitCodingAnswer({ userId, question, answerText, selfConfidence
 export async function submitAnswer({ userId, sessionId, questionId, answerText, selectedOptionIndex, selfConfidence }) {
   const { data: question, error: qErr } = await supabaseAdmin
     .from('questions')
-    .select('*, interview_sessions!inner(id, user_id)')
+    .select('*, interview_sessions!inner(id, user_id, status)')
     .eq('id', questionId)
     .eq('interview_sessions.user_id', userId)
     .single();
   if (qErr || !question) {
     const err = new Error('Question not found');
     err.status = 404;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  if (question.interview_sessions.status !== 'active') {
+    const err = new Error(
+      question.interview_sessions.status === 'terminated'
+        ? 'This session was terminated for tab-switching violations'
+        : 'This session is no longer active'
+    );
+    err.status = 409;
     err.publicMessage = err.message;
     throw err;
   }
@@ -403,10 +455,54 @@ export async function submitAnswer({ userId, sessionId, questionId, answerText, 
   return submitCodingAnswer({ userId, question, answerText, selfConfidence, apiKey });
 }
 
+// Lets a stuck candidate move on without answering, rather than getting
+// stuck on one question. Counts as a 0 for skill-mastery tracking (a skip
+// carries no evidence of the skill), same as recordScoreAndAdvance treats
+// any other unanswered/incorrect signal.
+export async function skipQuestion({ userId, sessionId, questionId }) {
+  const { data: question, error: qErr } = await supabaseAdmin
+    .from('questions')
+    .select('*, interview_sessions!inner(id, user_id, status)')
+    .eq('id', questionId)
+    .eq('interview_sessions.user_id', userId)
+    .single();
+  if (qErr || !question) {
+    const err = new Error('Question not found');
+    err.status = 404;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  if (question.interview_sessions.status !== 'active') {
+    const err = new Error(
+      question.interview_sessions.status === 'terminated'
+        ? 'This session was terminated for tab-switching violations'
+        : 'This session is no longer active'
+    );
+    err.status = 409;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  const { error: aErr } = await supabaseAdmin.from('answers').insert({ question_id: question.id, skipped: true });
+  if (aErr) throw aErr;
+
+  const session = { id: question.interview_sessions.id };
+  const advance = await recordScoreAndAdvance({
+    userId,
+    session,
+    question,
+    allFlaggedIssues: [],
+    avgScore: 0,
+  });
+
+  return { status: advance.status, skipped: true, nextQuestion: advance.question };
+}
+
 export async function resolveCrossExam({ userId, sessionId, crossExamId, userRebuttal }) {
   const { data: crossExam, error: cErr } = await supabaseAdmin
     .from('cross_exams')
-    .select('*, answers!inner(id, question_id, questions!inner(*, interview_sessions!inner(id, user_id)))')
+    .select('*, answers!inner(id, question_id, questions!inner(*, interview_sessions!inner(id, user_id, status)))')
     .eq('id', crossExamId)
     .single();
   if (cErr || !crossExam) {
@@ -420,6 +516,17 @@ export async function resolveCrossExam({ userId, sessionId, crossExamId, userReb
   if (question.interview_sessions.user_id !== userId) {
     const err = new Error('Not found');
     err.status = 404;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  if (question.interview_sessions.status !== 'active') {
+    const err = new Error(
+      question.interview_sessions.status === 'terminated'
+        ? 'This session was terminated for tab-switching violations'
+        : 'This session is no longer active'
+    );
+    err.status = 409;
     err.publicMessage = err.message;
     throw err;
   }
@@ -453,6 +560,50 @@ export async function resolveCrossExam({ userId, sessionId, crossExamId, userReb
   return { status: advance.status, rebuttalScore: rebuttalFeedback.score, nextQuestion: advance.question };
 }
 
+const MAX_VIOLATIONS = 2;
+
+// Called when the frontend detects the candidate left fullscreen or switched
+// away from the tab mid-session. Two violations terminates the session
+// server-side — this is the authoritative check; the frontend's own
+// countdown is just UX, a determined user bypassing the UI can't out-argue
+// this endpoint into letting a 3rd violation slide.
+export async function recordViolation({ userId, sessionId }) {
+  const { data: session, error } = await supabaseAdmin
+    .from('interview_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .single();
+  if (error || !session) {
+    const err = new Error('Session not found');
+    err.status = 404;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  // Already terminated/completed — report the existing state rather than
+  // double-counting a violation against a session that's already over.
+  if (session.status !== 'active') {
+    return { violationCount: session.violation_count, terminated: session.status === 'terminated', status: session.status };
+  }
+
+  const violationCount = session.violation_count + 1;
+  const terminated = violationCount >= MAX_VIOLATIONS;
+
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('interview_sessions')
+    .update({
+      violation_count: violationCount,
+      ...(terminated ? { status: 'terminated', completed_at: new Date().toISOString() } : {}),
+    })
+    .eq('id', sessionId)
+    .select('*')
+    .single();
+  if (updateErr) throw updateErr;
+
+  return { violationCount: updated.violation_count, terminated, status: updated.status };
+}
+
 export async function completeSession({ userId, sessionId }) {
   const { data: session, error: sErr } = await supabaseAdmin
     .from('interview_sessions')
@@ -467,18 +618,31 @@ export async function completeSession({ userId, sessionId }) {
     throw err;
   }
 
+  if (session.status === 'terminated') {
+    const err = new Error('This session was terminated for tab-switching violations and cannot be completed');
+    err.status = 409;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
   const { data: questions } = await supabaseAdmin
     .from('questions')
     .select(
-      'id, skill_tag, question_type, correct_option_index, answers(id, self_confidence, selected_option_index, panel_feedback(score, flagged_issues))'
+      'id, skill_tag, question_type, correct_option_index, answers(id, self_confidence, selected_option_index, skipped, panel_feedback(score, flagged_issues))'
     )
     .eq('session_id', sessionId);
 
   // `answers.question_id` is a unique FK, so PostgREST embeds it as a single
   // object (not an array) — same for any other 1:1 embed in this codebase.
-  const answered = (questions || []).filter((q) => q.answers && (q.question_type === 'mcq' || q.answers.panel_feedback?.length));
+  // A skipped coding question has no panel_feedback rows (no Gemini call was
+  // made) but must still count as answered — otherwise it's silently
+  // dropped from the average instead of scoring 0 like a skipped MCQ does.
+  const answered = (questions || []).filter(
+    (q) => q.answers && (q.question_type === 'mcq' || q.answers.skipped || q.answers.panel_feedback?.length)
+  );
 
   function scoreFor(q) {
+    if (q.answers.skipped) return 0;
     if (q.question_type === 'mcq') return q.answers.selected_option_index === q.correct_option_index ? 100 : 0;
     return mean(q.answers.panel_feedback.map((f) => f.score));
   }

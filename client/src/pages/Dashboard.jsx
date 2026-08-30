@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Inbox } from 'lucide-react';
 import { apiClient } from '../lib/apiClient.js';
-import ScoreTrendChart from '../components/ScoreTrendChart.jsx';
 import WeaknessRadarChart from '../components/WeaknessRadarChart.jsx';
+import SkillHistoryPanel from '../components/SkillHistoryPanel.jsx';
+import WeaknessExplorer from '../components/WeaknessExplorer.jsx';
+import DailyChallengeCard from '../components/DailyChallengeCard.jsx';
+import PracticeDrillModal from '../components/PracticeDrillModal.jsx';
 import Spinner from '../components/Spinner.jsx';
 
 export default function Dashboard() {
@@ -13,37 +16,25 @@ export default function Dashboard() {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
+  const [radarData, setRadarData] = useState([]);
+  const [weakSkills, setWeakSkills] = useState([]);
+  const [selectedSkill, setSelectedSkill] = useState(null);
+  const [drill, setDrill] = useState(null);
+
   useEffect(() => {
-    apiClient.get('/sessions').then(({ data }) => {
-      setSessions(data.sessions);
-      setLoading(false);
-    });
+    apiClient
+      .get('/sessions')
+      .then(({ data }) => setSessions(data.sessions))
+      .finally(() => setLoading(false));
+    apiClient
+      .get('/practice/skill-radar')
+      .then(({ data }) => setRadarData(data.radar))
+      .catch(() => {});
+    apiClient
+      .get('/practice/weak-skills')
+      .then(({ data }) => setWeakSkills(data.weakSkills))
+      .catch(() => {});
   }, []);
-
-  const completed = sessions.filter((s) => s.status === 'completed');
-
-  const trendData = useMemo(
-    () =>
-      [...completed]
-        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-        .map((s, i) => ({ label: `#${i + 1}`, score: s.overall_score })),
-    [completed]
-  );
-
-  const radarData = useMemo(() => {
-    const tally = {};
-    // `session_summaries.session_id` is a unique FK, so Supabase embeds it as
-    // a single object, not an array.
-    for (const s of completed) {
-      for (const { issue, count } of s.session_summaries?.top_weaknesses || []) {
-        tally[issue] = (tally[issue] || 0) + count;
-      }
-    }
-    return Object.entries(tally)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([issue, count]) => ({ issue, count }));
-  }, [completed]);
 
   const filtered = sessions.filter((s) => {
     const matchesQuery = s.target_role.toLowerCase().includes(query.toLowerCase());
@@ -62,20 +53,36 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <div className="card-interactive">
-          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
-            Score trend
+      <div className="mt-6 card">
+        <h2 className="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Daily challenge
+        </h2>
+        <DailyChallengeCard />
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="card-interactive flex h-[26rem] flex-col">
+          <h2 className="shrink-0 font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
+            Skill radar
           </h2>
-          <ScoreTrendChart data={trendData} />
+          <div className="flex-1 overflow-y-auto">
+            <WeaknessRadarChart data={radarData} onSkillClick={setSelectedSkill} />
+          </div>
         </div>
-        <div className="card-interactive">
-          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
-            Weakness fingerprint
+        <div className="card-interactive flex h-[26rem] flex-col">
+          <h2 className="mb-3 shrink-0 font-display text-sm font-semibold uppercase tracking-wide text-slate-400">
+            Weakness explorer
           </h2>
-          <WeaknessRadarChart data={radarData} />
+          <div className="flex-1 overflow-y-auto pr-1">
+            <WeaknessExplorer weakSkills={weakSkills} onPractice={(skillTag, resources) => setDrill({ skillTag, resources })} />
+          </div>
         </div>
       </div>
+
+      {selectedSkill && <SkillHistoryPanel skillTag={selectedSkill} onClose={() => setSelectedSkill(null)} />}
+      {drill && (
+        <PracticeDrillModal skillTag={drill.skillTag} resources={drill.resources} onClose={() => setDrill(null)} />
+      )}
 
       <div className="mt-8 flex gap-3">
         <input
@@ -92,6 +99,7 @@ export default function Dashboard() {
           <option value="all">All</option>
           <option value="active">In progress</option>
           <option value="completed">Completed</option>
+          <option value="terminated">Terminated</option>
         </select>
       </div>
 
@@ -123,10 +131,14 @@ export default function Dashboard() {
                 )}
                 <span
                   className={`rounded-full px-2.5 py-0.5 text-xs ${
-                    s.status === 'completed' ? 'bg-charcoal-800 text-slate-400' : 'bg-amber-500/20 text-amber-400'
+                    s.status === 'completed'
+                      ? 'bg-charcoal-800 text-slate-400'
+                      : s.status === 'terminated'
+                        ? 'bg-panel-skeptical/20 text-panel-skeptical'
+                        : 'bg-amber-500/20 text-amber-400'
                   }`}
                 >
-                  {s.status === 'completed' ? 'Completed' : 'In progress'}
+                  {s.status === 'completed' ? 'Completed' : s.status === 'terminated' ? 'Terminated' : 'In progress'}
                 </span>
               </div>
             </Link>

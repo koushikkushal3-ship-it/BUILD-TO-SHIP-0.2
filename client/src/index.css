@@ -79,31 +79,41 @@ body {
   @apply bg-amber-500/30 text-amber-100;
 }
 
-.btn-primary {
-  /* Text stays a fixed dark neutral (not the theme-inverting slate/charcoal
-     tokens) because amber is a light-toned fill in BOTH themes — dark text
-     on it is correct either way, unlike the page background it sits on. */
-  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 font-semibold text-neutral-900 transition hover:bg-amber-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
-}
+/* Component classes belong in Tailwind's "components" layer, which is
+   emitted BEFORE "utilities" — that's what lets a one-off utility class
+   (e.g. `w-40`) correctly override a component default (e.g. `.input-field`'s
+   built-in `w-full`) when both are combined on the same element. Left as
+   plain CSS, these would compile after every utility and silently win
+   cascade ties instead, which is exactly what broke the session-filter
+   `<select className="input-field w-40">` — `.input-field`'s `width: 100%`
+   was overriding `w-40` instead of the other way around. */
+@layer components {
+  .btn-primary {
+    /* Text stays a fixed dark neutral (not the theme-inverting slate/charcoal
+       tokens) because amber is a light-toned fill in BOTH themes — dark text
+       on it is correct either way, unlike the page background it sits on. */
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 font-semibold text-neutral-900 transition hover:bg-amber-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
+  }
 
-.btn-secondary {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-charcoal-600 bg-charcoal-800 px-5 py-2.5 font-semibold text-slate-100 transition hover:border-amber-500/50 hover:bg-charcoal-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
-}
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-charcoal-600 bg-charcoal-800 px-5 py-2.5 font-semibold text-slate-100 transition hover:border-amber-500/50 hover:bg-charcoal-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
+  }
 
-.card {
-  @apply rounded-2xl border border-charcoal-700 bg-charcoal-900/80 p-6 shadow-lg shadow-black/20 backdrop-blur transition-all duration-200;
-}
+  .card {
+    @apply rounded-2xl border border-charcoal-700 bg-charcoal-900/80 p-6 shadow-lg shadow-black/20 backdrop-blur transition-all duration-200;
+  }
 
-.card-interactive {
-  @apply card hover:-translate-y-0.5 hover:border-amber-500/40 hover:shadow-xl;
-}
+  .card-interactive {
+    @apply card hover:-translate-y-0.5 hover:border-amber-500/40 hover:shadow-xl;
+  }
 
-.input-field {
-  @apply w-full rounded-lg border border-charcoal-600 bg-charcoal-800 px-4 py-2.5 text-slate-100 placeholder:text-slate-500 transition focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500;
-}
+  .input-field {
+    @apply w-full rounded-lg border border-charcoal-600 bg-charcoal-800 px-4 py-2.5 text-slate-100 placeholder:text-slate-500 transition focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500;
+  }
 
-.spinner {
-  @apply h-5 w-5 animate-spin rounded-full border-2 border-charcoal-600 border-t-amber-500;
+  .spinner {
+    @apply h-5 w-5 animate-spin rounded-full border-2 border-charcoal-600 border-t-amber-500;
+  }
 }
 
 @keyframes shake {

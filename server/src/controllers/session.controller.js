@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { supabaseAdmin } from '../lib/supabaseClient.js';
-import { startSession, submitAnswer, resolveCrossExam, completeSession } from '../services/agent.service.js';
+import { startSession, submitAnswer, skipQuestion, resolveCrossExam, completeSession, recordViolation } from '../services/agent.service.js';
 
 export const submitAnswerSchema = z.object({
   answerText: z.string().max(8000).optional(),
@@ -87,6 +87,19 @@ export async function postAnswer(req, res, next) {
   }
 }
 
+export async function postSkip(req, res, next) {
+  try {
+    const result = await skipQuestion({
+      userId: req.user.id,
+      sessionId: req.params.sessionId,
+      questionId: req.params.questionId,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function postRebuttal(req, res, next) {
   try {
     const result = await resolveCrossExam({
@@ -104,6 +117,15 @@ export async function postRebuttal(req, res, next) {
 export async function postComplete(req, res, next) {
   try {
     const result = await completeSession({ userId: req.user.id, sessionId: req.params.sessionId });
+    res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function postViolation(req, res, next) {
+  try {
+    const result = await recordViolation({ userId: req.user.id, sessionId: req.params.sessionId });
     res.status(201).json(result);
   } catch (err) {
     next(err);
