@@ -15,4 +15,18 @@ export default defineConfig({
     },
   },
   server: { port: 5173 },
+  build: {
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-charts': ['recharts'],
+          'vendor-monaco': ['@monaco-editor/react'],
+          'vendor-motion': ['framer-motion', 'lucide-react'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+        },
+      },
+    },
+  },
 });
