@@ -10,7 +10,29 @@ import { errorHandler } from './src/middleware/errorHandler.js';
 
 const app = express();
 
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+// FRONTEND_URL accepts a comma-separated list. A single hardcoded origin
+// breaks any deploy served from a different hostname — notably Vercel preview
+// deployments, which get a fresh URL every build. When that happens the
+// browser blocks every API call before it leaves the page, which surfaces as
+// unrelated-looking UI bugs (spinners that never resolve, saves that revert,
+// uploads that "can't read the file") rather than an obvious CORS error.
+const allowedOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // No Origin header: same-origin, curl, or server-to-server. Not a
+      // browser cross-origin request, so there's nothing to gate here.
+      if (!origin) return callback(null, true);
+      if (!allowedOrigins.length) return callback(null, true);
+      if (allowedOrigins.includes(origin.replace(/\/$/, ''))) return callback(null, true);
+      return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
+  })
+);
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));

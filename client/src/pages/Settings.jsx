@@ -11,15 +11,29 @@ export default function Settings() {
   const [targetRole, setTargetRole] = useState('');
   const [resumeSummary, setResumeSummary] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    apiClient.get('/profile').then(({ data }) => {
-      setName(data.profile?.name || '');
-      setTargetRole(data.profile?.target_role || '');
-      setResumeSummary(data.profile?.resume_summary || '');
-      setLoading(false);
-    });
+    // `finally` (not just `then`) so a rejected request still clears the
+    // loading flag — otherwise an expired session, a cold-start timeout, or
+    // any network blip leaves the page spinning forever with nothing shown.
+    apiClient
+      .get('/profile')
+      .then(({ data }) => {
+        setName(data.profile?.name || '');
+        setTargetRole(data.profile?.target_role || '');
+        setResumeSummary(data.profile?.resume_summary || '');
+      })
+      .catch((err) => {
+        setLoadError(
+          err.response?.data?.error ||
+            (err.response
+              ? 'Could not load your profile.'
+              : 'Could not reach the server. Check your connection and try again.')
+        );
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   async function handleSave(e) {
@@ -34,6 +48,12 @@ export default function Settings() {
   return (
     <main className="mx-auto max-w-xl px-6 py-12">
       <h1 className="font-display text-2xl font-semibold text-slate-100">Settings</h1>
+
+      {loadError && (
+        <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-400">
+          {loadError}
+        </p>
+      )}
 
       <form onSubmit={handleSave} className="card mt-6 flex flex-col gap-4">
         <h2 className="font-display text-lg font-semibold text-slate-100">Profile</h2>

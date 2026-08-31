@@ -34,10 +34,18 @@ export default function KeyVaultForm() {
   const [error, setError] = useState('');
 
   function refresh() {
-    apiClient.get('/keys').then(({ data }) => {
-      setKeys(data.keys);
-      setLoading(false);
-    });
+    // See Settings.jsx — `finally` so a failed load can't strand this in a
+    // permanent loading state with no visible reason.
+    apiClient
+      .get('/keys')
+      .then(({ data }) => setKeys(data.keys))
+      .catch((err) =>
+        setError(
+          err.response?.data?.error ||
+            (err.response ? 'Could not load your saved keys.' : 'Could not reach the server.')
+        )
+      )
+      .finally(() => setLoading(false));
   }
 
   useEffect(refresh, []);

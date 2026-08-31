@@ -68,6 +68,7 @@ export default function News() {
   const [error, setError] = useState('');
   const [savedUrls, setSavedUrls] = useState(new Set());
   const [savedArticles, setSavedArticles] = useState(null);
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     apiClient
@@ -107,16 +108,28 @@ export default function News() {
     };
   }, [tab]);
 
+  function describeError(err) {
+    return (
+      err.response?.data?.error ||
+      (err.response
+        ? 'Something went wrong saving that article.'
+        : "Couldn't reach the server — the change wasn't saved.")
+    );
+  }
+
   async function toggleSave(story) {
+    setSaveError('');
     const isSaved = savedUrls.has(story.url);
     const nextUrls = new Set(savedUrls);
     if (isSaved) {
       nextUrls.delete(story.url);
       setSavedUrls(nextUrls);
       setSavedArticles((prev) => (prev || []).filter((a) => a.url !== story.url));
-      apiClient.delete('/news/saved', { data: { url: story.url } }).catch(() => {
-        // Revert on failure so the button doesn't lie about saved state.
+      apiClient.delete('/news/saved', { data: { url: story.url } }).catch((err) => {
+        // Revert on failure so the button doesn't lie about saved state — and
+        // say why, instead of the icon silently flipping back.
         setSavedUrls(new Set(nextUrls).add(story.url));
+        setSaveError(describeError(err));
       });
     } else {
       nextUrls.add(story.url);
@@ -132,10 +145,11 @@ export default function News() {
           feed: tab,
         });
         setSavedArticles((prev) => [data.saved, ...(prev || [])]);
-      } catch {
+      } catch (err) {
         const reverted = new Set(nextUrls);
         reverted.delete(story.url);
         setSavedUrls(reverted);
+        setSaveError(describeError(err));
       }
     }
   }
@@ -169,6 +183,12 @@ export default function News() {
           </button>
         ))}
       </div>
+
+      {saveError && (
+        <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-400">
+          {saveError}
+        </p>
+      )}
 
       <div className="mt-6 flex flex-col gap-3">
         {tab !== 'saved' && error && <p className="text-sm text-slate-500">{error}</p>}
