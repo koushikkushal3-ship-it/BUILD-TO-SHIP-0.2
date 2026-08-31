@@ -72,15 +72,20 @@ export async function uploadResumeFile(req, res, next) {
 
     const resumeSummary = await extractResumeText(req.file.buffer, req.file.mimetype);
 
-    const apiKey = await resolveApiKey(req.user.id);
-    const classification = await classifyResumeText({ apiKey, text: resumeSummary });
-    if (!classification.isResume) {
-      const err = new Error(
-        `That looks like a ${classification.documentType}, not a resume — ${classification.reason}`
-      );
-      err.status = 400;
-      err.publicMessage = err.message;
-      throw err;
+    try {
+      const apiKey = await resolveApiKey(req.user.id);
+      const classification = await classifyResumeText({ apiKey, text: resumeSummary });
+      if (classification && classification.isResume === false) {
+        const err = new Error(
+          `That looks like a ${classification.documentType}, not a resume — ${classification.reason}`
+        );
+        err.status = 400;
+        err.publicMessage = err.message;
+        throw err;
+      }
+    } catch (classifyErr) {
+      if (classifyErr.status === 400) throw classifyErr;
+      console.warn('Resume classification bypassed due to AI error:', classifyErr.message);
     }
 
     await ensureProfile(req.user);
