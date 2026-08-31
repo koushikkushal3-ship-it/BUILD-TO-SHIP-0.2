@@ -20,6 +20,6 @@ export function scrubbedLog(label, payload) {
 }
 
 export function errorHandler(err, req, res, _next) {
-  scrubbedLog('[error]', { message: err.message, path: req.path, body: req.body });
-  res.status(err.status || 500).json({ error: err.publicMessage || 'Internal server error' });
+  scrubbedLog('[error]', { message: err.message, path: req.path, body: req.body, stack: err.stack });
+  res.status(err.status || 500).json({ error: err.publicMessage || err.message || 'Internal server error' });
 }
