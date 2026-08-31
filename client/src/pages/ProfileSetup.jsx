@@ -22,7 +22,6 @@ export default function ProfileSetup() {
       .then(({ data }) => {
         setName(data.profile?.name || '');
         setTargetRole(data.profile?.target_role || '');
-        setResumeSummary(data.profile?.resume_summary || '');
       })
       .finally(() => setLoading(false));
   }, []);
