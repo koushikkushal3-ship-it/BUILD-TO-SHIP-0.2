@@ -6,7 +6,16 @@ import { GoogleGenAI, Type } from '@google/genai';
 // free-tier quota — a single 5-question interview session can burn through that.
 // gemini-3.5-flash-lite has a much higher free quota and is plenty capable for
 // short structured-JSON calls like these. Override via GEMINI_MODEL if needed.
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+function getActiveModel() {
+  const env = process.env.GEMINI_MODEL?.trim();
+  const deprecated = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash'];
+  if (!env || deprecated.includes(env)) {
+    return 'gemini-3.5-flash-lite';
+  }
+  return env;
+}
+
+const MODEL = getActiveModel();
 
 function getClient(apiKey) {
   return new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY });
@@ -14,16 +23,28 @@ function getClient(apiKey) {
 
 async function generateStructured({ apiKey, systemInstruction, prompt, schema }) {
   const ai = getClient(apiKey);
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: {
-      systemInstruction,
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-    },
-  });
-  return JSON.parse(response.text);
+  const modelsToTry = [MODEL, 'gemini-3.5-flash-lite', 'gemini-3.6-flash'].filter((m, i, arr) => arr.indexOf(m) === i);
+  let lastErr;
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: schema,
+        },
+      });
+      return JSON.parse(response.text);
+    } catch (err) {
+      lastErr = err;
+      console.warn(`Model ${model} failed, trying fallback...`, err.message);
+    }
+  }
+
+  throw lastErr;
 }
 
 const MCQ_SCHEMA = {
