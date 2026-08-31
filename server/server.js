@@ -29,7 +29,11 @@ app.use(
       if (!origin) return callback(null, true);
       if (!allowedOrigins.length) return callback(null, true);
       if (allowedOrigins.includes(origin.replace(/\/$/, ''))) return callback(null, true);
-      return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+      // Reject by omitting the CORS headers, not by throwing. Passing an
+      // Error here propagates to the error handler and answers the preflight
+      // with a 500, which reads like the server is broken rather than like
+      // the origin simply isn't allowed.
+      return callback(null, false);
     },
   })
 );
