@@ -8,6 +8,7 @@ function WeaknessRow({ skill, onPractice }) {
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   async function toggle() {
     if (open) {
@@ -17,9 +18,22 @@ function WeaknessRow({ skill, onPractice }) {
     setOpen(true);
     if (!details && !loading) {
       setLoading(true);
-      const { data } = await apiClient.get('/practice/weak-skills/explain', { params: { skillTag: skill.skillTag } });
-      setDetails(data);
-      setLoading(false);
+      setError('');
+      try {
+        const { data } = await apiClient.get('/practice/weak-skills/explain', {
+          params: { skillTag: skill.skillTag },
+        });
+        setDetails(data);
+      } catch (err) {
+        // This is a live Gemini call, so it can fail — don't leave the row
+        // stuck on "Thinking it through" with no explanation.
+        setError(
+          err.response?.data?.error ||
+            (err.response ? "Couldn't load an explanation." : 'Could not reach the server.')
+        );
+      } finally {
+        setLoading(false);
+      }
     }
   }
 
@@ -53,6 +67,8 @@ function WeaknessRow({ skill, onPractice }) {
                   Thinking it through <TypingDots />
                 </span>
               )}
+
+              {error && <p className="text-sm text-red-400">{error}</p>}
 
               {details && (
                 <div className="flex flex-col gap-3">

@@ -7,13 +7,28 @@ import Spinner from './Spinner.jsx';
 
 export default function SkillHistoryPanel({ skillTag, onClose }) {
   const [history, setHistory] = useState(null);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setHistory(null);
-    apiClient.get('/practice/skill-radar/history', { params: { skillTag } }).then(({ data }) => {
-      if (!cancelled) setHistory(data.history);
-    });
+    setLoadError('');
+    apiClient
+      .get('/practice/skill-radar/history', { params: { skillTag } })
+      .then(({ data }) => {
+        if (!cancelled) setHistory(data.history);
+      })
+      .catch((err) => {
+        // history stays null on failure, which the render treats as "still
+        // loading" — so without this the panel spins forever.
+        if (!cancelled) {
+          setHistory([]);
+          setLoadError(
+            err.response?.data?.error ||
+              (err.response ? "Couldn't load this skill's history." : 'Could not reach the server.')
+          );
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -45,6 +60,7 @@ export default function SkillHistoryPanel({ skillTag, onClose }) {
           </div>
 
           {history === null && <Spinner label="Loading history…" />}
+          {loadError && <p className="mt-3 text-sm text-red-400">{loadError}</p>}
 
           {history !== null && history.length === 0 && (
             <p className="mt-3 text-sm text-slate-500">

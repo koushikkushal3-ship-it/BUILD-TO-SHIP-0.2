@@ -18,20 +18,32 @@ function calibrationLabel(gap) {
 export default function SessionSummary() {
   const { sessionId } = useParams();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [summary, setSummary] = useState(null);
   const [resources, setResources] = useState([]);
 
   useEffect(() => {
-    apiClient.get(`/sessions/${sessionId}`).then(({ data }) => {
-      // `session_summaries.session_id` is a unique FK, so Supabase embeds it
-      // as a single object, not an array.
-      setSummary(data.session.session_summaries);
-      setResources(data.resources || []);
-      setLoading(false);
-    });
+    // `finally` so a failed request still clears the spinner — otherwise any
+    // network error leaves this page loading forever with nothing shown.
+    apiClient
+      .get(`/sessions/${sessionId}`)
+      .then(({ data }) => {
+        // `session_summaries.session_id` is a unique FK, so Supabase embeds it
+        // as a single object, not an array.
+        setSummary(data.session.session_summaries);
+        setResources(data.resources || []);
+      })
+      .catch((err) =>
+        setLoadError(
+          err.response?.data?.error ||
+            (err.response ? 'Could not load this summary.' : 'Could not reach the server.')
+        )
+      )
+      .finally(() => setLoading(false));
   }, [sessionId]);
 
   if (loading) return <Spinner label="Loading summary…" />;
+  if (loadError) return <div className="p-10 text-center text-red-400">{loadError}</div>;
   if (!summary) return <div className="p-10 text-center text-slate-400">Summary not available yet.</div>;
 
   const calibration = calibrationLabel(summary.calibration_gap);

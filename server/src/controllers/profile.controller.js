@@ -5,7 +5,12 @@ import { classifyResumeText, analyzeAtsScore } from '../services/gemini.service.
 import { resolveApiKey } from '../services/agent.service.js';
 
 export const updateProfileSchema = z.object({
-  name: z.string().min(1).max(120).optional(),
+  // No min(1): the name field is genuinely optional in the UI, and the form
+  // always sends it. With min(1) an empty string failed validation, so
+  // leaving the (unmarked, optional) name blank rejected the entire profile
+  // save with "Validation failed" and no indication of which field was at
+  // fault. `.optional()` only permits an absent key, not an empty value.
+  name: z.string().max(120).optional(),
   targetRole: z.string().min(1).max(160),
   resumeSummary: z.string().max(6000).optional(),
 });

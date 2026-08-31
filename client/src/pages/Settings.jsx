@@ -13,6 +13,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     // `finally` (not just `then`) so a rejected request still clears the
@@ -39,8 +40,18 @@ export default function Settings() {
   async function handleSave(e) {
     e.preventDefault();
     setSaved(false);
-    await apiClient.put('/profile', { name, targetRole, resumeSummary });
-    setSaved(true);
+    setSaveError('');
+    try {
+      await apiClient.put('/profile', { name, targetRole, resumeSummary });
+      setSaved(true);
+    } catch (err) {
+      // Without this the button just goes quiet on failure — no "Saved."
+      // and no reason, so the change looks like it silently didn't apply.
+      setSaveError(
+        err.response?.data?.error ||
+          (err.response ? 'Could not save your profile.' : 'Could not reach the server.')
+      );
+    }
   }
 
   if (loading) return <Spinner />;
@@ -75,6 +86,7 @@ export default function Settings() {
         <button type="submit" className="btn-primary self-start">
           Save
         </button>
+        {saveError && <p className="animate-shake text-sm font-medium text-red-400">{saveError}</p>}
         <AnimatePresence>
           {saved && (
             <motion.p

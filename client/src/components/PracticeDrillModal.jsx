@@ -11,14 +11,26 @@ export default function PracticeDrillModal({ skillTag, resources, onClose }) {
   const [selected, setSelected] = useState(null);
   const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   async function loadNewQuestion() {
     setLoading(true);
+    setLoadError('');
     setSelected(null);
     setRevealed(false);
-    const { data } = await apiClient.post('/practice/drill', { skillTag });
-    setQuestion(data.question);
-    setLoading(false);
+    try {
+      const { data } = await apiClient.post('/practice/drill', { skillTag });
+      setQuestion(data.question);
+    } catch (err) {
+      // Generating a drill is a live Gemini call, so it can genuinely fail.
+      // Say so instead of spinning forever.
+      setLoadError(
+        err.response?.data?.error ||
+          (err.response ? "Couldn't generate a question. Try again." : 'Could not reach the server.')
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -82,6 +94,7 @@ export default function PracticeDrillModal({ skillTag, resources, onClose }) {
           )}
 
           {loading && <Spinner label="Generating a question…" />}
+          {loadError && <p className="mt-3 text-sm text-red-400">{loadError}</p>}
 
           {!loading && question && (
             <>

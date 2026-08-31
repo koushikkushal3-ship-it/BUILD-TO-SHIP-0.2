@@ -143,7 +143,15 @@ export default function SessionLive() {
   }, [sessionId, navigate]);
 
   useEffect(() => {
-    loadCurrentState();
+    // Without this catch a failed load leaves the page on "Loading session…"
+    // forever — the worst place for a silent hang, since it's the core flow.
+    loadCurrentState().catch((err) => {
+      setError(
+        err.response?.data?.error ||
+          (err.response ? 'Could not load this session.' : 'Could not reach the server.')
+      );
+      setLoading(false);
+    });
   }, [loadCurrentState]);
 
   useEffect(() => {
@@ -319,6 +327,15 @@ export default function SessionLive() {
   }
 
   if (loading) return <Spinner label="Loading session…" />;
+  // A load failure leaves no question to render, so show the reason rather
+  // than an empty shell.
+  if (error && !question) {
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-12">
+        <p className="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-400">{error}</p>
+      </main>
+    );
+  }
   if (terminated) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-12">

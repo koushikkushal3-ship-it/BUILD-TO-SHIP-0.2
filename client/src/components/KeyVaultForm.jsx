@@ -67,8 +67,14 @@ export default function KeyVaultForm() {
   }
 
   async function handleDelete(id) {
-    await apiClient.delete(`/keys/${id}`);
-    refresh();
+    setError('');
+    try {
+      await apiClient.delete(`/keys/${id}`);
+      refresh();
+    } catch (err) {
+      // Otherwise a failed delete looks like nothing happened at all.
+      setError(err.response?.data?.error || 'Could not delete that key.');
+    }
   }
 
   const info = PROVIDER_INFO[provider];
