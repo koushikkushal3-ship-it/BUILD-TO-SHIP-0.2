@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { apiClient } from '../lib/apiClient.js';
-import Spinner from '../components/Spinner.jsx';
 import ResumeUpload from '../components/ResumeUpload.jsx';
 import TypingDots from '../components/TypingDots.jsx';
 import AtsScoreCard from '../components/AtsScoreCard.jsx';
@@ -12,19 +11,8 @@ export default function ProfileSetup() {
   const [name, setName] = useState('');
   const [targetRole, setTargetRole] = useState('');
   const [resumeSummary, setResumeSummary] = useState('');
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    apiClient
-      .get('/profile')
-      .then(({ data }) => {
-        setName(data.profile?.name || '');
-        setTargetRole(data.profile?.target_role || '');
-      })
-      .finally(() => setLoading(false));
-  }, []);
 
   async function handleSave(e) {
     e.preventDefault();
@@ -40,8 +28,6 @@ export default function ProfileSetup() {
       setSaving(false);
     }
   }
-
-  if (loading) return <Spinner />;
 
   const canStart = Boolean(targetRole.trim() && resumeSummary.trim());
 
